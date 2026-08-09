@@ -120,6 +120,28 @@ accurate. `0.65` was chosen to catch the former without over-flagging the latter
 was calibrated on one document — revisit once more real scanned submissions are
 available.
 
+### testbench-frontend (Next.js)
+
+Not a Heroku app — these are build-time env vars for whoever owns the Next.js repo.
+No custom domain exists yet (`tech.seesunilag.com` isn't a Cloudflare zone), so both
+values below point at raw provider URLs rather than the nice domains in the original
+frontend PRD. Update these if/when custom domains are set up.
+
+```
+NEXT_PUBLIC_API_BASE_URL=https://testbench-api-53f53b05d813.herokuapp.com
+NEXT_PUBLIC_R2_PUBLIC_BASE=https://pub-42861a7682c8422c854d3698618e8987.r2.dev
+```
+
+**Note on `NEXT_PUBLIC_R2_PUBLIC_BASE`:** the `testbench-uploads` R2 bucket has
+public read access enabled (Cloudflare's `r2.dev` public bucket URL) — any object is
+readable by anyone with its `storage_key`, no auth required. This matches the
+original architecture (a public CDN in front of R2), but means the entire security
+model rests on `storage_key` being an unguessable UUID, not on any access control.
+Given uploaded files can contain student PII (names, matric numbers visible in
+scanned exam photos), don't make `storage_key` predictable or sequential. If a
+stronger model is ever needed, the alternative is presigned per-request GET URLs
+instead of a permanent public bucket — more secure, more backend work.
+
 ## Cloudflare Worker
 
 The glue between the two backend services — triggered by the Floater's
