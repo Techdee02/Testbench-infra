@@ -4,21 +4,25 @@ Deploy configs and ops tooling for Testbench's backend services. This repo does 
 contain application code — `testbench-api` and `testbench-pipeline` each live in their
 own repo and deploy independently to the Heroku apps described below.
 
-## Known gaps
+## Extraction pipeline — three LLM strategies
 
-**The vision-fallback LLM path is broken.** In `testbench-backend`,
-`extraction.strategy.ts`'s `VisionLLMExtractor` triggers whenever OCR confidence
-averages below `CONFIDENCE_THRESHOLD` (0.65), and it assumes an Azure **OpenAI**
-resource exists at `AZURE_OCR_ENDPOINT` (`openai/deployments/.../chat/completions`).
-That endpoint is actually an Azure **Document Intelligence** resource — a different
-Azure product — and returns `401` on that route. Confirmed broken by direct test
-(2026-08-09). Every real upload with low OCR confidence (common — handwriting,
-symbols, misoriented scans all score low) will fail extraction until this is fixed.
+`testbench-backend`'s `extraction.strategy.ts` routes each upload to one of three
+extractors, based on OCR confidence and document size:
 
-Fix requires provisioning an actual vision-capable LLM (Azure OpenAI GPT-4o,
-or another provider) — not done yet, flagged rather than fixed to avoid picking a
-vendor/cost commitment unilaterally. Needs a decision before this ships to real
-students.
+| Condition | Strategy | Provider |
+|---|---|---|
+| Confidence ≥ threshold, text fits Groq's TPM budget | `FastLLMExtractor` | Groq (`llama-3.1-8b-instant`) |
+| Confidence ≥ threshold, text too large for Groq | `OpenAIOverflowExtractor` | Azure OpenAI (`gpt-4.1-mini`) |
+| Confidence < threshold | `VisionLLMExtractor` | Azure OpenAI (`gpt-4.1-mini`, vision) |
+
+**History**: the vision path was originally broken (pointed at the Document
+Intelligence resource instead of an actual Azure OpenAI resource, 401'd on every
+call), and large documents originally failed outright on Groq's TPM rate limit
+before being routed elsewhere. Both fixed 2026-08-09 — a real Azure OpenAI/AI
+Foundry resource (`testbench-llm-resource`, `gpt-4.1-mini` deployment, 30k TPM) now
+backs both the vision fallback and the large-document overflow case. Verified
+end-to-end against a real 204-page/94,624-char PDF: 48 questions extracted
+correctly in ~40s, single request.
 
 ## Services
 
@@ -118,15 +122,19 @@ deploy/testbench-pipeline/.env.example
 | `R2_SECRET_KEY` | ✅ set |
 | `OCR_API_KEY` | ✅ set — Azure AI Services (Document Intelligence) subscription key |
 | `GROQ_API_KEY` | ✅ set |
-| `VISION_LLM_API_KEY` | ✅ set — same Azure key as `OCR_API_KEY` (one Azure resource serves both OCR and vision extraction) |
+| `VISION_LLM_API_KEY` | ✅ set — Azure OpenAI/AI Foundry key. **Not** the same value as `OCR_API_KEY` (see note below) |
 | `CONFIDENCE_THRESHOLD` | ✅ set to `0.65` — calibrated against a real scanned exam script via Azure Document Intelligence (`prebuilt-layout`). See note below. |
-| `AZURE_OCR_ENDPOINT` | ✅ set — not in the original var list, but required by Azure alongside the key. Format: `https://<resource>.cognitiveservices.azure.com/` |
+| `AZURE_OCR_ENDPOINT` | ✅ set — not in the original var list, but required by Azure alongside the key. Format: `https://<resource>.cognitiveservices.azure.com/`. Used only for OCR (Document Intelligence) |
 | `AZURE_OCR_REGION` | ✅ set — Azure region of the Cognitive Services resource (`southafricanorth`) |
+| `AZURE_OPENAI_ENDPOINT` | ✅ set — not in the original var list. Azure AI Foundry Responses API endpoint: `https://testbench-llm-resource.services.ai.azure.com/openai/v1/responses`. Used for vision fallback and large-document overflow (separate resource from `AZURE_OCR_ENDPOINT` — don't conflate them, that was the original vision-path bug) |
+| `AZURE_OPENAI_DEPLOYMENT` | ✅ set to `gpt-4.1-mini` — not in the original var list |
 
-**Note on OCR provider:** the original plan assumed a generic OCR provider; this was
-switched to Azure AI Services (Document Intelligence) during setup. `OCR_API_KEY` and
-`VISION_LLM_API_KEY` intentionally hold the same value since one Azure resource covers
-both.
+**Note on OCR vs. LLM providers:** two separate Azure resources are in play, easy to
+confuse (this was the exact bug that broke the vision path originally). `AZURE_OCR_ENDPOINT`
++ `OCR_API_KEY` → Document Intelligence, OCR only. `AZURE_OPENAI_ENDPOINT` +
+`VISION_LLM_API_KEY` → Azure OpenAI/AI Foundry, used for both the vision-fallback
+extractor and the Groq-overflow text extractor. Don't merge these back into one
+resource/key pair.
 
 **Note on `CONFIDENCE_THRESHOLD`:** tested against a real scanned exam script.
 Word-level OCR confidence split cleanly into two failure modes — genuine misreads

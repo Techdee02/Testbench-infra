@@ -1,4 +1,5 @@
 image.png
 *.pptx
+*.pdf
 .env
 worker/.wrangler/
