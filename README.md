@@ -4,6 +4,22 @@ Deploy configs and ops tooling for Testbench's backend services. This repo does 
 contain application code — `testbench-api` and `testbench-pipeline` each live in their
 own repo and deploy independently to the Heroku apps described below.
 
+## Known gaps
+
+**The vision-fallback LLM path is broken.** In `testbench-backend`,
+`extraction.strategy.ts`'s `VisionLLMExtractor` triggers whenever OCR confidence
+averages below `CONFIDENCE_THRESHOLD` (0.65), and it assumes an Azure **OpenAI**
+resource exists at `AZURE_OCR_ENDPOINT` (`openai/deployments/.../chat/completions`).
+That endpoint is actually an Azure **Document Intelligence** resource — a different
+Azure product — and returns `401` on that route. Confirmed broken by direct test
+(2026-08-09). Every real upload with low OCR confidence (common — handwriting,
+symbols, misoriented scans all score low) will fail extraction until this is fixed.
+
+Fix requires provisioning an actual vision-capable LLM (Azure OpenAI GPT-4o,
+or another provider) — not done yet, flagged rather than fixed to avoid picking a
+vendor/cost commitment unilaterally. Needs a decision before this ships to real
+students.
+
 ## Services
 
 | App | Repo | Stack | Role |
