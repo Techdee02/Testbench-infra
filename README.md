@@ -31,8 +31,12 @@ correctly in ~40s, single request.
 | [testbench-api](https://dashboard.heroku.com/apps/testbench-api) | testbench-api | FastAPI (Python) | Public API, owns the DB schema |
 | [testbench-pipeline](https://dashboard.heroku.com/apps/testbench-pipeline) | testbench-pipeline | Node/Express | OCR/LLM extraction |
 
-- testbench-api: https://testbench-api-53f53b05d813.herokuapp.com/
+- testbench-api: https://api.testbench.study/ (custom domain; raw Heroku URL
+  `https://testbench-api-53f53b05d813.herokuapp.com/` still works too)
 - testbench-pipeline: https://testbench-pipeline-0a144388bf78.herokuapp.com/
+  (internal only, never called directly by students - no custom domain needed)
+- frontend: https://www.testbench.study/ (deployed on Vercel; `testbench.study`
+  308-redirects to `www`)
 
 ## Dyno tier — read this before touching dyno settings
 
@@ -146,15 +150,20 @@ available.
 
 ### testbench-frontend (Next.js)
 
-Not a Heroku app — these are build-time env vars for whoever owns the Next.js repo.
-No custom domain exists yet (`tech.seesunilag.com` isn't a Cloudflare zone), so both
-values below point at raw provider URLs rather than the nice domains in the original
-frontend PRD. Update these if/when custom domains are set up.
+Not a Heroku app — these are build-time env vars for whoever owns the Next.js repo,
+deployed on Vercel at `testbench.study` (custom domain purchased via Namecheap,
+DNS records at Namecheap, not delegated to Vercel/Cloudflare nameservers - see
+"Domain setup" below).
 
 ```
-NEXT_PUBLIC_API_BASE_URL=https://testbench-api-53f53b05d813.herokuapp.com
+NEXT_PUBLIC_API_BASE_URL=https://api.testbench.study
 NEXT_PUBLIC_R2_PUBLIC_BASE=https://pub-42861a7682c8422c854d3698618e8987.r2.dev
 ```
+
+`NEXT_PUBLIC_R2_PUBLIC_BASE` still uses the `r2.dev` URL rather than a
+`testbench.study` subdomain — R2 custom domains require the zone to be
+Cloudflare-managed, which isn't the case here (DNS is on Namecheap). Not worth
+migrating for this alone; see "Domain setup" below for the full tradeoff.
 
 **Note on `NEXT_PUBLIC_R2_PUBLIC_BASE`:** the `testbench-uploads` R2 bucket has
 public read access enabled (Cloudflare's `r2.dev` public bucket URL) — any object is
@@ -201,6 +210,38 @@ Verified end-to-end (Worker → Pipeline → Postgres write) during setup — th
 also caught and fixed a real bug: Pipeline's Postgres connection wasn't configured
 for SSL, which Heroku Postgres requires. See `testbench-backend`'s commit history
 (`src/lib/db.ts`) for the fix.
+
+## Domain setup
+
+`testbench.study` was purchased via Namecheap. DNS is managed at **Namecheap**
+(BasicDNS, Advanced DNS host records), **not** delegated to Cloudflare or Vercel
+nameservers — a deliberate choice, not an oversight. See the reasoning below.
+
+**Current DNS records (Namecheap → Advanced DNS):**
+
+| Type | Host | Value | Purpose |
+|---|---|---|---|
+| CNAME | `api` | `philosophical-asparagus-hevi7siqfx4397dl16hr7iin.herokudns.com` | Routes to testbench-api |
+| A | `@` | `216.198.79.1` | Vercel apex (frontend root) |
+| CNAME | `www` | `cname.vercel-dns.com` | Vercel (frontend) |
+
+`testbench.study` 308-redirects to `www.testbench.study` (Vercel's own config, not
+a Namecheap redirect record — the domain was briefly misconfigured with a
+Namecheap "URL Redirect Record" on `@` during setup, which conflicted with Vercel's
+verification; that was removed in favor of the plain A record above).
+
+**Heroku side:** `api.testbench.study` added via `heroku domains:add -a
+testbench-api`, with Automatic Certificate Management (`heroku certs:auto:enable`)
+providing the SSL cert — ACM is **off by default** on new custom domains, easy to
+miss (caused an initial SSL verification failure until enabled).
+
+**Why DNS stays on Namecheap instead of moving to Cloudflare:** the only things
+that actually require a Cloudflare-managed zone are custom domains for the
+existing Worker (currently on `workers.dev`) and the R2 public bucket (currently
+on `r2.dev`) — neither is user-facing (the Worker is an internal trigger endpoint,
+the R2 URL only appears in `<img src>` attributes). Migrating DNS is optional
+polish, not a functional requirement; revisit only if those URLs specifically need
+to look branded later.
 
 ## Budget
 
