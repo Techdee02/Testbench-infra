@@ -175,6 +175,32 @@ scanned exam photos), don't make `storage_key` predictable or sequential. If a
 stronger model is ever needed, the alternative is presigned per-request GET URLs
 instead of a permanent public bucket — more secure, more backend work.
 
+**CORS policy on the bucket:** the frontend uploads directly to R2 via a presigned
+PUT URL (browser → R2, never through the backend), which requires the bucket's own
+CORS policy to allow the frontend's origin — separate from anything in
+testbench-api or testbench-pipeline. Configured via the Cloudflare API
+(`PUT /accounts/{id}/r2/buckets/testbench-uploads/cors`):
+
+```json
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": ["https://www.testbench.study", "https://testbench.study"],
+        "methods": ["PUT", "GET", "HEAD"],
+        "headers": ["Content-Type"]
+      },
+      "exposeHeaders": ["ETag"],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}
+```
+
+If the frontend ever moves origins (new domain, Vercel preview URLs, `localhost`
+for local dev), add them to `origins` or uploads will fail with a browser CORS
+error even though the presigned URL itself is valid.
+
 ## Cloudflare Worker
 
 The glue between the two backend services — triggered by the Floater's
